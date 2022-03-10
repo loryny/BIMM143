@@ -1,0 +1,47 @@
+---
+title: "find-a-gene"
+author: "Loryn Young"
+date: "3/6/2022"
+output: html_document
+---
+
+```{r}
+library(bio3d)
+```
+
+```{r}
+aln <- read.fasta("musclealign.clw.fasta")
+aln
+```
+
+```{r}
+heat <- seqidentity(aln)
+```
+
+```{r}
+library(pheatmap)
+```
+
+
+```{r}
+pheatmap(heat)
+```
+
+```{r}
+library(bio3d)
+```
+
+
+```{r}
+pdb <- read.pdb("2kdk")
+blast <- blast.pdb(pdbseq(pdb))
+```
+
+```{r}
+head(blast$hit.tbl)
+top.hits <- plot(blast)
+```
+
+
+
+
