@@ -1,0 +1,445 @@
+---
+title: "Transcriptomics and the Analysis of RNA-Seq Data"
+author: "Loryn Young"
+date: "2/22/2022"
+output: pdf_document
+---
+
+1. Bioconductor and DESeq2 setup
+
+#install.packages("BiocManager")
+#BiocManager::install()
+
+#BiocManager::install("DESeq2")
+
+```{r}
+library(BiocManager)
+library(DESeq2)
+```
+
+
+2. Important countData and colData
+
+```{r}
+counts <- read.csv("airway_scaledcounts.csv", row.names=1)
+metadata <-  read.csv("airway_metadata.csv")
+```
+
+```{r}
+head(counts)
+```
+
+
+```{r}
+head(metadata)
+```
+
+```{r}
+metadata$id == colnames(counts)
+```
+
+
+> Q1. How many genes are in this dataset? 
+
+There are 38694 genes in this dataset. 
+
+```{r}
+dim(counts)
+```
+
+> Q2. How many ‘control’ cell lines do we have? 
+
+There are 4 control cell lines in this dataset.
+
+```{r}
+sum(metadata$dex == "control")
+```
+
+3. Toy differential gene expression
+
+##Extract and summarize the control samples 
+
+To find out where the control samples are we need the metadata 
+
+```{r}
+library(dplyr)
+control <- metadata %>% filter(dex=="control")
+control.counts <- counts %>% select(control$id) 
+control.mean <- rowSums(control.counts)/4
+head(control.mean)
+```
+
+
+> Q3. How would you make the above code in either approach more robust?
+
+You can make the above code in either approach more robust by using 'rowMeans' instead of 'rowSums', or by finding out the number of samples from the code itself  
+
+```{r}
+control <- metadata[metadata$dex=="control",]
+control.counts <- counts[ ,control$id]
+control.mean <- rowMeans(control.counts) 
+head(control.mean)
+```
+
+> Q4. Follow the same procedure for the treated samples (i.e. calculate the mean per gene across drug treated samples and assign to a labeled vector called treated.mean)
+
+##Extract and summarize the treated (i.e. drug) samples
+
+```{r}
+treated <- metadata[metadata$dex == "treated", ]
+treated.counts <- counts[, treated$id]
+treated.mean <- rowMeans(treated.counts)
+```
+
+Store these results together in a new data frame called 'meancounts'
+
+```{r}
+meancounts <- data.frame(control.mean, treated.mean)
+```
+
+```{r}
+colSums(meancounts)
+```
+
+
+> Q5 (a). Create a scatter plot showing the mean of the treated samples against the mean of the control samples. Your plot should look something like the following.
+
+Lets make a plot to explore the results 
+
+```{r}
+plot(meancounts[,1], meancounts[,2])
+```
+
+> Q5 (b).You could also use the ggplot2 package to make this figure producing the plot below. What geom_?() function would you use for this plot? 
+
+geom_point
+
+```{r}
+library(ggplot2)
+
+ggplot(meancounts) + aes(control.mean, treated.mean) + geom_point()
+```
+> Q6. Try plotting both axes on a log scale. What is the argument to plot() that allows you to do this?
+
+log="xy" allows us to plot both axes on a log scale
+
+We will make a log-log plot to draw out this skewed data and see what is going on 
+
+```{r}
+plot(meancounts[,1], meancounts[,2], log="xy", xlab= "log control counts", ylab="log of treated counts")
+```
+We often log2 transformations when dealing with this sort of data
+
+```{r}
+log2(80/20)
+```
+
+This log2 transformation has this nice property where if there is no change the log2 value will be zero and if it doubles the log2 value will be 1 and if halved it will be -1
+
+So lets add a log2 fold change column to our results so far 
+
+```{r}
+meancounts$log2fc <- log2(meancounts[,"treated.mean"]/meancounts[,"control.mean"])
+```
+
+```{r}
+head(meancounts)
+```
+
+We need to get rid of zero count genes that we cannot say anything about
+
+```{r}
+zero.vals <- which(meancounts[,1:2]==0, arr.ind=TRUE)
+
+to.rm <- unique(zero.vals[,1])
+mycounts <- meancounts[-to.rm,]
+head(mycounts)
+```
+How many genes are remaining? 
+
+```{r}
+nrow(mycounts)
+```
+
+
+> Q7. What is the purpose of the arr.ind argument in the which() function call above? Why would we then take the first column of the output and need to call the unique() function?
+
+The purpose of the arr.ind argument in the which() function call above is to output TRUE values in the position where the genes (rows) and samples (columns) have zero counts. We would then need to call the unique() function in order to make sure any row does not get counted twice if it has a zero in both samples. 
+
+# Use fold change to see up and down regulated genes 
+
+> Q8. Using the up.ind vector above can you determine how many up regulated genes we have at the greater than 2 fc level? 
+
+250 up regulated genes at the greater than 2 fc level
+
+```{r}
+up.ind <- mycounts$log2fc > 2
+sum(up.ind)
+```
+
+> Q9. Using the down.ind vector above can you determine how many down regulated genes we have at the greater than 2 fc level? 
+
+367 down regulated genes at the greater than 2 fc level
+
+```{r}
+down.ind <- mycounts$log2fc < (-2)
+sum(down.ind)
+```
+
+
+> Q10. Do you trust these results? Why or why not?
+
+I do not trust these results, because fold change can be large without being statistically significant. Because we have not done anything to determine whether or not the differences we are seeing are significant, the current data can be misleading. Before we can trust the results, we should use the DESeq2 package to further analyze the data. 
+
+4. DESeq2 analysis
+
+```{r}
+library(DESeq2)
+```
+
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData=counts, 
+                              colData=metadata, 
+                              design=~dex)
+```
+
+```{r}
+dds <- DESeq(dds)
+```
+
+
+```{r}
+res <- results(dds)
+res
+```
+
+We can get some basic summary tallies using the 'summary()' function
+
+```{r}
+summary(res, alpha=0.05)
+```
+
+
+```{r}
+res05 <- results(dds, alpha=0.05)
+summary(res05)
+```
+
+5. Adding annotation data 
+
+```{r}
+library("AnnotationDbi")
+```
+
+```{r}
+BiocManager::install("org.Hs.eg.db")
+```
+
+```{r}
+library("org.Hs.eg.db")
+```
+
+```{r}
+columns(org.Hs.eg.db)
+```
+
+```{r}
+res$symbol <- mapIds(org.Hs.eg.db, keys=row.names(res), keytype="ENSEMBL", column="SYMBOL", multiVals="first")
+```
+
+```{r}
+head(res)
+```
+
+> Q11. Run the mapIds() function two more times to add the Entrez ID and UniProt accession and GENENAME as new columns called res$entrez, res$uniprot and res$genename.
+
+```{r}
+res$entrez <- mapIds(org.Hs.eg.db,
+                     keys=row.names(res),
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+res$uniprot <- mapIds(org.Hs.eg.db,
+                     keys=row.names(res),
+                     column="UNIPROT",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+res$genename <- mapIds(org.Hs.eg.db,
+                     keys=row.names(res),
+                     column="GENENAME",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+```
+
+```{r}
+head(res)
+```
+
+```{r}
+ord <- order( res$padj )
+```
+
+```{r}
+head(res[ord,])
+```
+
+```{r}
+write.csv(res[ord,], "deseq_results.csv")
+```
+
+
+6. Data Visualization
+
+Volcano plots
+
+```{r}
+plot( res$log2FoldChange,  -log(res$padj), 
+      xlab="Log2(FoldChange)",
+      ylab="-Log(P-value)")
+```
+
+```{r}
+plot( res$log2FoldChange,  -log(res$padj), 
+ ylab="-Log(P-value)", xlab="Log2(FoldChange)")
+abline(v=c(-2,2), col="darkgray", lty=2)
+abline(h=-log(0.05), col="darkgray", lty=2)
+```
+
+```{r}
+mycols <- rep("gray", nrow(res))
+mycols[ abs(res$log2FoldChange) > 2 ]  <- "red" 
+
+inds <- (res$padj < 0.01) & (abs(res$log2FoldChange) > 2 )
+mycols[ inds ] <- "blue"
+```
+
+```{r}
+plot( res$log2FoldChange,  -log(res$padj), 
+ col=mycols, ylab="-Log(P-value)", xlab="Log2(FoldChange)" )
+
+abline(v=c(-2,2), col="gray", lty=2)
+abline(h=-log(0.1), col="gray", lty=2)
+```
+```{r}
+BiocManager::install("EnhancedVolcano")
+```
+
+```{r}
+library(EnhancedVolcano)
+```
+
+```{r}
+x <- as.data.frame(res)
+
+EnhancedVolcano(x,
+    lab = x$symbol,
+    x = 'log2FoldChange',
+    y = 'pvalue')
+```
+
+7. Pathway analysis
+
+```{r}
+BiocManager::install( c("pathview", "gage", "gageData") )
+```
+
+```{r}
+library(pathview)
+library(gage)
+library(gageData)
+
+data(kegg.sets.hs)
+```
+
+```{r}
+head(kegg.sets.hs, 2)
+```
+
+```{r}
+foldchanges = res$log2FoldChange
+names(foldchanges) = res$entrez
+head(foldchanges)
+```
+
+```{r}
+keggres = gage(foldchanges, gsets=kegg.sets.hs)
+```
+
+```{r}
+attributes(keggres)
+```
+
+```{r}
+head(keggres$less, 3)
+```
+
+```{r}
+pathview(gene.data=foldchanges, pathway.id="hsa05310")
+```
+
+![](hsa05310.pathview.png)
+
+```{r}
+pathview(gene.data=foldchanges, pathway.id="hsa05310", kegg.native=FALSE)
+```
+
+> Q12. Can you do the same procedure as above to plot the pathview figures for the top 2 down-reguled pathways?
+
+```{r}
+pathview(gene.data=foldchanges, pathway.id="hsa05332")
+```
+
+![](hsa05332.pathview.png)
+
+```{r}
+pathview(gene.data=foldchanges, pathway.id="hsa04940")
+```
+
+![](hsa04940.pathview.png)
+
+Plotting counts for genes of interest
+
+```{r}
+i <- grep("CRISPLD2", res$symbol)
+res[i,]
+```
+
+```{r}
+rownames(res[i,])
+```
+
+```{r}
+plotCounts(dds, gene="ENSG00000103196", intgroup="dex")
+```
+```{r}
+d <- plotCounts(dds, gene="ENSG00000103196", intgroup="dex", returnData=TRUE)
+head(d)
+```
+```{r}
+boxplot(count ~ dex , data=d)
+```
+
+```{r}
+library(ggplot2)
+```
+
+```{r}
+ggplot(d, aes(dex, count, fill=dex)) + 
+  geom_boxplot() + 
+  scale_y_log10() + 
+  ggtitle("CRISPLD2")
+```
+
+Session Information
+
+```{r}
+sessionInfo()
+```
+
